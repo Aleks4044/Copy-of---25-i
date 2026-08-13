@@ -2135,13 +2135,50 @@ class BSDState(rx.State):
         finally:
             self.is_loading = False
 
+    def _startup_sync_events(self):
+        """Агрегатите што зависат од примарните BZZ податоци.
+
+        Се враќаат и кога вчитувањето не успее, за Преглед и Маркети да се
+        синхронизираат во празна состојба со порака за грешка, а апликацијата
+        да остане видлива.
+        """
+        from app.states.markets_state import MarketsState
+        from app.states.overview_state import OverviewState
+
+        return [OverviewState.sync, MarketsState.sync]
+
     @rx.event
     async def load(self):
-        if self.has_loaded or self.is_loading:
-            return
-        yield
-        await self._load_from_api()
-        yield
+        """Иницијално вчитување при отворање на страницата.
+
+        Ова е единствениот примарен влез: при првото вчитување СЕКОГАШ ги
+        зема реалните BZZ податоци за избраниот датум, а веднаш потоа ги
+        синхронизира Преглед и Маркети — и кога BZZ врати грешка, за да не
+        останат агрегатите во празна, несинхронизирана состојба.
+
+        Бавните јавни извори (Mutating, SportScore, Fudbal91, ESPN) и табот
+        со модели НЕ се вчитуваат тука — тие остануваат отложени до
+        отворање на соодветниот таб или до бавен круг на автоматското
+        освежување.
+        """
+        if not self.has_loaded and not self.is_loading:
+            # Прикажи ја состојбата на вчитување веднаш, пред мрежните барања.
+            self.is_loading = True
+            self.error = ""
+            yield
+            try:
+                await self._load_from_api()
+            except Exception as error:
+                logging.exception(
+                    f"Error: примарното вчитување не успеа: {error}"
+                )
+                self.error = "Неочекувана грешка при вчитување на податоците."
+            finally:
+                self.is_loading = False
+            yield
+        # Агрегатите се синхронизираат секогаш — и при успех и при грешка.
+        for event in self._startup_sync_events():
+            yield event
 
     @rx.event
     async def refresh_data(self):
