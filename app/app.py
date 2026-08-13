@@ -10,12 +10,8 @@ from app.components.sportscore_view import sportscore_view
 from app.components.tab_nav import tab_nav
 from app.states.app_state import AppState
 from app.states.bsd_state import BSDState
-from app.states.fudbal91_state import Fudbal91State
 from app.states.markets_state import MarketsState
-from app.states.models_state import ModelsState
-from app.states.mutating_state import MutatingState
 from app.states.overview_state import OverviewState
-from app.states.sportscore_state import SportScoreState
 
 
 def tab_content() -> rx.Component:
@@ -69,14 +65,13 @@ app.add_page(
     index,
     route="/",
     title="BSD Фудбал · Предвидувања",
+    # Само примарните податоци за почетниот приказ се вчитуваат веднаш;
+    # бавните јавни извори се вчитуваат кога корисникот ќе го отвори
+    # соодветниот таб или при бавен круг на автоматското освежување.
     on_load=[
         BSDState.load,
-        MutatingState.load,
         OverviewState.load,
         MarketsState.load,
-        ModelsState.load,
-        SportScoreState.load,
-        Fudbal91State.load,
         AppState.start_clock,
     ],
 )

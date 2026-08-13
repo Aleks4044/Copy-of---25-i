@@ -176,7 +176,16 @@ class SportScoreState(rx.State):
 
     async def _load(self):
         """Безбедно вчитување: мрежните грешки никогаш не се пренесуваат нагоре."""
+        if self.is_loading:
+            return
         self.is_loading = True
+        try:
+            await self._load_inner()
+        finally:
+            self.is_loading = False
+
+    async def _load_inner(self):
+        """Само вчитувањето; заклучувањето го држи `_load`."""
         day = self.selected_date_value
         try:
             rows, notice = await asyncio.to_thread(
@@ -226,7 +235,6 @@ class SportScoreState(rx.State):
         self.notice = notice
         self.error = ""
         self.has_loaded = True
-        self.is_loading = False
         self.fetched_at = local_clock()
 
     @rx.event

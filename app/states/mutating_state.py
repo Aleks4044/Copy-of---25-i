@@ -575,37 +575,48 @@ class MutatingState(rx.State):
         return len(self.named_rows) > 0
 
     async def _load(self) -> None:
+        if self.is_loading:
+            return
         self.is_loading = True
         try:
-            raw_rows = await asyncio.to_thread(_fetch_rows)
-        except Exception as error:
-            logging.exception("Unexpected error")
-            logging.info(
-                f"Mutating.com статусот не е достапен: {type(error).__name__}"
-            )
-            self.error = UNAVAILABLE_NOTE
+            try:
+                raw_rows = await asyncio.to_thread(_fetch_rows)
+            except Exception as error:
+                logging.exception("Unexpected error")
+                logging.info(
+                    f"Mutating.com статусот не е достапен: "
+                    f"{type(error).__name__}"
+                )
+                self.error = UNAVAILABLE_NOTE
+                return
+            try:
+                enriched, page_notice = await asyncio.to_thread(
+                    mutating_scrape.fetch_predictions
+                )
+            except Exception as error:
+                logging.exception("Unexpected error")
+                logging.info(
+                    f"Mutating.com предвидувањата не се вчитани: "
+                    f"{type(error).__name__}"
+                )
+                enriched, page_notice = {}, UNAVAILABLE_NOTE
+            self.page_notice = page_notice
+            self.enriched_count = len(enriched)
+            rows: list[MutatingRow] = []
+            for raw in raw_rows:
+                row = _to_row(raw, enriched)
+                if row is not None:
+                    rows.append(row)
+            if not rows:
+                self.error = UNAVAILABLE_NOTE
+                return
+            rows.sort(key=_sort_key)
+            self.rows = rows
+            self.fetched_at = local_clock()
+            self.error = ""
+            self.has_loaded = True
+        finally:
             self.is_loading = False
-            return
-        enriched, page_notice = await asyncio.to_thread(
-            mutating_scrape.fetch_predictions
-        )
-        self.page_notice = page_notice
-        self.enriched_count = len(enriched)
-        rows: list[MutatingRow] = []
-        for raw in raw_rows:
-            row = _to_row(raw, enriched)
-            if row is not None:
-                rows.append(row)
-        if not rows:
-            self.error = UNAVAILABLE_NOTE
-            self.is_loading = False
-            return
-        rows.sort(key=_sort_key)
-        self.rows = rows
-        self.fetched_at = local_clock()
-        self.error = ""
-        self.has_loaded = True
-        self.is_loading = False
 
     @rx.event
     async def sync_coverage(self):

@@ -78,19 +78,23 @@ def _local_date(raw: str) -> date | None:
 # пагинација и лимит 200 по страница — така се покриваат сите настани од
 # прозорецот, не само првата страница.
 EVENT_PAGE_LIMIT = 200
-MAX_EVENT_PAGES = 6
+# Конзервативни, предвидливи лимити: едно рачно освежување или иницијално
+# вчитување мора да заврши во практично време на барање, па страниците и
+# подресурсите по настан се строго ограничени.
+MAX_EVENT_PAGES = 3
 LIVE_PAGE_LIMIT = 100
-MAX_LIVE_PAGES = 3
+MAX_LIVE_PAGES = 2
 PREDICTION_PAGE_LIMIT = 200
-MAX_PREDICTION_PAGES = 5
+MAX_PREDICTION_PAGES = 3
 
 # Јавната слика за грб на тим не бара автентикација и НИКОГАШ не смее да
 # содржи API клуч во URL-то.
 TEAM_IMAGE_BASE = "https://sports.bzzoiro.com/img/team"
-MAX_ENRICHED = 3
+MAX_ENRICHED = 2
 # Колку натпревари од денес смеат да добијат форма од /h2h/ дури и без
-# предвидување. Конзервативно, за да не се прекрши ограничувањето на API-то.
-MAX_FORM_ENRICHED = 6
+# предвидување. Конзервативно, за да не се прекрши ограничувањето на API-то
+# и за да не се надмине практичното време на едно освежување.
+MAX_FORM_ENRICHED = 3
 NA_LABEL = "Недостапно"
 RATE_LIMIT_NOTE = (
     "Деталните статистики (xG и форма) не се вчитани бидејќи API-то ограничи "
@@ -110,17 +114,17 @@ PREDICTIONS_UNAVAILABLE_NOTE = (
 # Колку настани смеат да го користат ресурсот за предвидување по настан кога
 # листата /predictions/ не врати предвидување (конзервативно, за да не се
 # активира ограничувањето 429).
-EVENT_PREDICTION_LIMIT = 36
+EVENT_PREDICTION_LIMIT = 10
 EVENT_PREDICTION_NOTE = (
     "{count} натпревари добија предвидување директно од ресурсот за "
     "предвидување по настан, бидејќи листата не го врати."
 )
 # Колку настани без официјално предвидување смеат да добијат изведено
 # предвидување од реалните ресурси по настан (квоти/H2H/состави/статистики).
-DERIVED_PREDICTION_LIMIT = 26
+DERIVED_PREDICTION_LIMIT = 6
 # Само за неколку настани се проверуваат и опционалните ресурси
 # (/summary/ и /money/), бидејќи тие најчесто враќаат 404.
-DERIVED_OPTIONAL_LIMIT = 4
+DERIVED_OPTIONAL_LIMIT = 1
 DERIVED_APPLIED_NOTE = (
     "{count} натпревари без официјално BZZ предвидување добија изведено "
     "предвидување пресметано САМО од реални BZZ ресурси по ред: квоти, "
@@ -131,6 +135,25 @@ DERIVED_UNAVAILABLE_NOTE = (
     "во резимето, ниту меѓусебни средби за овој натпревар, па предвидување "
     "не може да се изведе и ништо не се измислува. Деталите за секој "
     "ресурс се видливи во панелот „BZZ извори по настан“."
+)
+# Забелешки за настани што НЕ биле побарани поради конзервативните лимити.
+# Не се пресметува ништо и не се измислува ниту една вредност за нив.
+DETAIL_LIMIT_NOTE = (
+    "Деталните BZZ ресурси за овој натпревар не се побарани во ова "
+    "освежување поради конзервативните лимити на барања (за да остане "
+    "освежувањето брзо). Затоа предвидувањето е недостапно и ништо не се "
+    "измислува — ресурсите можат да се прочитаат рачно во панелот „BZZ "
+    "извори по настан“ или при следното освежување."
+)
+DETAIL_LIMIT_NOTICE = (
+    "{count} натпревари без официјално предвидување не беа побарани во ова "
+    "освежување поради лимитите на барања; тие остануваат видливи со ознака "
+    "за недостапност."
+)
+ENRICH_LIMIT_NOTICE = (
+    "Деталните статистики и формата се читаат за најмногу "
+    f"{MAX_ENRICHED} + {MAX_FORM_ENRICHED} натпревари по освежување; "
+    "останатите остануваат без xG и форма, без измислени вредности."
 )
 MISSING_KEY_ERROR = (
     "Не е поставен API клуч (BZZOIRO_API_KEY), па BZZ натпреварите и "
@@ -1606,13 +1629,18 @@ def collect_matches(start: date | None = None) -> ApiSnapshot:
     # прозорецот кои листата /predictions/ не ги вратила, и се применуваат
     # САМО вистински вратени веројатности од тој одговор.
     detail_applied = 0
+    detail_skipped = 0
     if not rate_limited:
-        targets = [
+        detail_candidates = [
             m
             for m in matches
             if not m["has_prediction"]
             and m["status"] in ("upcoming", "live", "finished")
-        ][:EVENT_PREDICTION_LIMIT]
+        ]
+        targets = detail_candidates[:EVENT_PREDICTION_LIMIT]
+        detail_skipped = len(detail_candidates) - len(targets)
+        for match in detail_candidates[len(targets) :]:
+            match["prediction_note"] = DETAIL_LIMIT_NOTE
         for match in targets:
             payload, status = _fetch_event_prediction(match["event_id"])
             if status == api_client.RATE_LIMIT_STATUS:
@@ -1635,13 +1663,18 @@ def collect_matches(start: date | None = None) -> ApiSnapshot:
     # без предвидување и добива јасна забелешка.
     derived_applied = 0
     derived_unavailable = 0
+    derived_skipped = 0
     if not rate_limited:
-        derived_targets = [
+        derived_candidates = [
             m
             for m in matches
             if not m["has_prediction"]
             and m["status"] in ("upcoming", "live", "finished")
-        ][:DERIVED_PREDICTION_LIMIT]
+        ]
+        derived_targets = derived_candidates[:DERIVED_PREDICTION_LIMIT]
+        derived_skipped = len(derived_candidates) - len(derived_targets)
+        for match in derived_candidates[len(derived_targets) :]:
+            match["prediction_note"] = DETAIL_LIMIT_NOTE
         for index, match in enumerate(derived_targets):
             sources = bzz_derived.fetch_sources(
                 match["event_id"],
@@ -1752,6 +1785,11 @@ def collect_matches(start: date | None = None) -> ApiSnapshot:
         notice = f"{notice} {extra}".strip()
     elif derived_unavailable and not notice:
         notice = DERIVED_UNAVAILABLE_NOTE
+
+    skipped_total = max(detail_skipped, derived_skipped)
+    if skipped_total:
+        extra = DETAIL_LIMIT_NOTICE.format(count=skipped_total)
+        notice = f"{notice} {extra} {ENRICH_LIMIT_NOTICE}".strip()
 
     error = ""
     if not matches:

@@ -496,11 +496,14 @@ def fetch_sources(
         # Без квоти, без резиме и без H2H не се прави дополнително барање.
         return out
 
+    # Конзервативно: составите се читаат секогаш (мала корекција), а
+    # статистиките и парите само за првите неколку настани, за да едно
+    # освежување остане во практично време на барање.
     secondary = [
         ("lineups", f"/events/{event_id}/lineups/"),
-        ("stats", f"/events/{event_id}/stats/"),
     ]
     if allow_optional:
+        secondary.append(("stats", f"/events/{event_id}/stats/"))
         secondary.append(("money", f"/events/{event_id}/money/"))
     for key, path in secondary:
         payload, status = api_client.get_optional_dict(path)

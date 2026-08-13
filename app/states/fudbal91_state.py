@@ -261,28 +261,33 @@ class Fudbal91State(rx.State):
         return urls
 
     async def _load(self) -> None:
-        self.is_loading = True
-        fixtures, notice = await asyncio.to_thread(fudbal91_client.fetch_offer)
-        if not fixtures:
-            self.rows = []
-            self.notice = notice
-            self.error = notice
-            self.is_loading = False
+        if self.is_loading:
             return
-        plain = [dict(fixture) for fixture in fixtures]
-        entries = await self._coverage()
-        urls = self._compare_targets(plain, entries)
-        compares: dict[str, fudbal91_client.Fudbal91Compare] = {}
-        if urls:
-            compares = await asyncio.to_thread(
-                fudbal91_client.fetch_compare, urls
+        self.is_loading = True
+        try:
+            fixtures, notice = await asyncio.to_thread(
+                fudbal91_client.fetch_offer
             )
-        self._rebuild(plain, compares, entries)
-        self.notice = notice
-        self.error = ""
-        self.fetched_at = local_clock()
-        self.has_loaded = True
-        self.is_loading = False
+            if not fixtures:
+                self.rows = []
+                self.notice = notice
+                self.error = notice
+                return
+            plain = [dict(fixture) for fixture in fixtures]
+            entries = await self._coverage()
+            urls = self._compare_targets(plain, entries)
+            compares: dict[str, fudbal91_client.Fudbal91Compare] = {}
+            if urls:
+                compares = await asyncio.to_thread(
+                    fudbal91_client.fetch_compare, urls
+                )
+            self._rebuild(plain, compares, entries)
+            self.notice = notice
+            self.error = ""
+            self.fetched_at = local_clock()
+            self.has_loaded = True
+        finally:
+            self.is_loading = False
 
     def _dependent_events(self):
         """Агрегатите што користат Fudbal91 изведени редови."""
@@ -303,13 +308,16 @@ class Fudbal91State(rx.State):
 
     @rx.event
     async def refresh(self):
+        """Освежување од циклусот на апликацијата.
+
+        Агрегатите (Преглед и Маркети) се синхронизираат од `AppState` по
+        завршување на целиот круг, за да не се повторува истата работа.
+        """
         if self.is_loading:
             return
         yield
         await self._load()
         yield
-        for event in self._dependent_events():
-            yield event
 
     @rx.event
     async def sync(self):

@@ -605,16 +605,18 @@ class ModelsState(rx.State):
         base_models = [dict(row) for row in self.models]
         self.stacking_is_loading = True
         yield
-        result = await asyncio.to_thread(
-            predictions.run_pipeline, matches, base_models
-        )
-        saved = 0
-        if result["predictions"] > 0:
-            saved = await asyncio.to_thread(
-                predictions.persist_predictions, result, result["metrics"]
+        try:
+            result = await asyncio.to_thread(
+                predictions.run_pipeline, matches, base_models
             )
-        self._apply_stacking(result, saved)
-        self.stacking_is_loading = False
+            saved = 0
+            if result["predictions"] > 0:
+                saved = await asyncio.to_thread(
+                    predictions.persist_predictions, result, result["metrics"]
+                )
+            self._apply_stacking(result, saved)
+        finally:
+            self.stacking_is_loading = False
         yield
 
     @rx.event
