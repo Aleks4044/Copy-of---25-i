@@ -1,6 +1,7 @@
 """Состојба за дополнителниот SportScore таб (јавен widget API)."""
 
 import asyncio
+import logging
 from datetime import date, timedelta
 
 import reflex as rx
@@ -163,18 +164,43 @@ class SportScoreState(rx.State):
                 keys.add(sportscore_client.pair_key(row["home"], row["away"]))
         return keys
 
+    def _mark_unavailable(self, notice: str) -> None:
+        """Празна, но исправна состојба кога SportScore не е достапен."""
+        self.rows = []
+        self.enriched_count = 0
+        self.notice = notice
+        self.error = notice
+        self.has_loaded = True
+        self.is_loading = False
+        self.fetched_at = local_clock()
+
     async def _load(self):
+        """Безбедно вчитување: мрежните грешки никогаш не се пренесуваат нагоре."""
         self.is_loading = True
         day = self.selected_date_value
-        rows, notice = await asyncio.to_thread(
-            sportscore_client.fetch_rows, day, sportscore_client.MATCH_LIMIT
-        )
-        if not rows:
-            self.notice = notice
-            self.error = notice
-            self.is_loading = False
+        try:
+            rows, notice = await asyncio.to_thread(
+                sportscore_client.fetch_rows, day, sportscore_client.MATCH_LIMIT
+            )
+        except Exception as error:
+            logging.exception("Unexpected error")
+            logging.info(
+                f"SportScore не е достапен: {type(error).__name__}. "
+                "Прикажана е ознака за недостапност."
+            )
+            self._mark_unavailable(sportscore_client.UNAVAILABLE_NOTE)
             return
-        covered = await self._covered_pairs()
+        if not rows:
+            self._mark_unavailable(notice or sportscore_client.UNAVAILABLE_NOTE)
+            return
+        try:
+            covered = await self._covered_pairs()
+        except Exception as error:
+            logging.exception("Unexpected error")
+            logging.info(
+                f"SportScore покриеноста не е пресметана: {type(error).__name__}"
+            )
+            covered = set()
         plain: list[SportScoreRow] = []
         for row in rows:
             item = dict(row)
@@ -183,11 +209,18 @@ class SportScoreState(rx.State):
         targets = [r for r in plain if not r["covered"]]
         enriched = 0
         if targets:
-            enriched = await asyncio.to_thread(
-                sportscore_client.enrich_rows,
-                targets,
-                sportscore_client.DETAIL_LIMIT,
-            )
+            try:
+                enriched = await asyncio.to_thread(
+                    sportscore_client.enrich_rows,
+                    targets,
+                    sportscore_client.DETAIL_LIMIT,
+                )
+            except Exception as error:
+                logging.exception("Unexpected error")
+                logging.info(
+                    f"SportScore деталите не се вчитани: {type(error).__name__}"
+                )
+                enriched = 0
         self.rows = plain
         self.enriched_count = enriched
         self.notice = notice

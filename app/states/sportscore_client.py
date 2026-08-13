@@ -125,7 +125,13 @@ def _local_zone() -> ZoneInfo | timezone:
 
 
 def _network_label(error: Exception) -> str:
-    """Кратка ознака за очекувани мрежни грешки (без stack trace)."""
+    """Кратка ознака за очекувани мрежни грешки (без stack trace).
+
+    SSL грешките се третираат исто како timeout и грешка во конекцијата:
+    очекувана мрежна состојба, не дефект во апликацијата.
+    """
+    if isinstance(error, requests.exceptions.SSLError):
+        return "неуспешно SSL поврзување"
     if isinstance(error, requests.Timeout):
         return "истечено време на барањето (timeout)"
     if isinstance(error, requests.ConnectionError):
@@ -139,16 +145,24 @@ def _get_json(
     """Тивко GET барање кон widget API-то.
 
     Враќа JSON речник или None. Никогаш не крева исклучок и никогаш не логира
-    stack trace за очекувани мрежни грешки, HTTP 400/404/429/5xx или невалиден
-    JSON — само кратка info/warning линија.
+    stack trace за очекувани мрежни грешки (SSL, timeout, нема конекција),
+    HTTP 400/404/429/5xx или невалиден JSON — само кратка info/warning линија.
     """
     try:
         response = requests.get(
             f"{BASE_URL}{path}", params=params, timeout=TIMEOUT
         )
     except requests.RequestException as error:
+        # Очекувана мрежна состојба: без stack trace, без пренесување нагоре.
         logging.exception("Unexpected error")
         logging.info(f"{label} не е достапно: {_network_label(error)}.")
+        return None
+    except Exception as error:
+        # Неочекувана состојба — сепак не се пренесува нагоре, но се логира.
+        logging.exception("Unexpected error")
+        logging.warning(
+            f"{label} врати неочекувана состојба: {type(error).__name__}."
+        )
         return None
 
     if response.status_code != 200:
@@ -295,7 +309,7 @@ def fetch_rows(
     if payload is None:
         return [], UNAVAILABLE_NOTE
 
-    raw_rows = payload.get("matches")
+    raw_rows = payload.get("matches") if isinstance(payload, dict) else None
     if not isinstance(raw_rows, list) or not raw_rows:
         return [], EMPTY_NOTE
 
