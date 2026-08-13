@@ -87,7 +87,6 @@ class AppState(rx.State):
         from app.states.mutating_state import MutatingState
         from app.states.overview_state import OverviewState
         from app.states.sportscore_state import SportScoreState
-        from app.states.t1x2_state import T1x2State
 
         self.is_refreshing = True
         self.seconds_until_refresh = self.refresh_interval
@@ -99,7 +98,6 @@ class AppState(rx.State):
         yield MutatingState.sync_coverage
         yield SportScoreState.refresh
         yield Fudbal91State.refresh
-        yield T1x2State.refresh
         yield OverviewState.sync
         yield MarketsState.sync
         yield ModelsState.sync
@@ -144,7 +142,6 @@ class AppState(rx.State):
             from app.states.mutating_state import MutatingState
             from app.states.overview_state import OverviewState
             from app.states.sportscore_state import SportScoreState
-            from app.states.t1x2_state import T1x2State
 
             yield BSDState.refresh_data
             if not light_cycle:
@@ -155,7 +152,6 @@ class AppState(rx.State):
                 yield Fudbal91State.sync
             else:
                 yield Fudbal91State.refresh
-                yield T1x2State.refresh
             yield OverviewState.sync
             yield MarketsState.sync
             if not light_cycle:

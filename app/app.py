@@ -7,7 +7,6 @@ from app.components.models_view import models_view
 from app.components.mutating_panel import mutating_panel
 from app.components.overview import overview
 from app.components.sportscore_view import sportscore_view
-from app.components.t1x2_view import t1x2_view
 from app.components.tab_nav import tab_nav
 from app.states.app_state import AppState
 from app.states.bsd_state import BSDState
@@ -17,7 +16,6 @@ from app.states.models_state import ModelsState
 from app.states.mutating_state import MutatingState
 from app.states.overview_state import OverviewState
 from app.states.sportscore_state import SportScoreState
-from app.states.t1x2_state import T1x2State
 
 
 def tab_content() -> rx.Component:
@@ -29,7 +27,6 @@ def tab_content() -> rx.Component:
         ("markets", markets_view()),
         ("sources", mutating_panel()),
         ("sportscore", sportscore_view()),
-        ("t1x2", t1x2_view()),
         overview(),
     )
 
@@ -80,7 +77,6 @@ app.add_page(
         ModelsState.load,
         SportScoreState.load,
         Fudbal91State.load,
-        T1x2State.load,
         AppState.start_clock,
     ],
 )
