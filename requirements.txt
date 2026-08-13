@@ -12,3 +12,4 @@ scikit-learn
 joblib
 psycopg[binary]>=3.1.8
 sofascrape
+sportscore

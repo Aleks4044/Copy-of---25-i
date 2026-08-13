@@ -14,7 +14,6 @@ from app.states.bsd_state import BSDState
 from app.states.fudbal91_state import Fudbal91State
 from app.states.markets_state import MarketsState
 from app.states.models_state import ModelsState
-from app.states.multi_source_state import MultiSourceState
 from app.states.mutating_state import MutatingState
 from app.states.overview_state import OverviewState
 from app.states.sportscore_state import SportScoreState
@@ -82,7 +81,6 @@ app.add_page(
         SportScoreState.load,
         Fudbal91State.load,
         T1x2State.load,
-        MultiSourceState.fetch_all_matches,
         AppState.start_clock,
     ],
 )

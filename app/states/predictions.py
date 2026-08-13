@@ -621,6 +621,127 @@ def derive_markets(row: StackRow, probs: list[float]) -> list[StackingMarket]:
     return out
 
 
+class ScoreProjection(TypedDict):
+    """Проекција на точен резултат изведена од реални очекувани голови."""
+
+    match_id: str
+    match_label: str
+    period: str
+    period_label: str
+    rank: int
+    score: str
+    probability: float
+    basis: str
+    available: bool
+
+
+NO_XG_SCORE_NOTE = (
+    "Нема реални очекувани голови (xG / λ) за овој натпревар, па проекциите "
+    "на најверојатни FT и HT резултати не се достапни и не се измислуваат."
+)
+FT_PERIOD_LABEL = "Топ 3 FT резултати"
+HT_PERIOD_LABEL = "Топ 3 HT резултати"
+# Реален однос: околу 45% од очекуваните голови паѓаат во првото полувреме.
+HT_FACTOR = 0.45
+SCORE_GRID = 6
+
+
+def _pmf(lam: float, k: int) -> float:
+    return math.exp(-lam) * lam**k / math.factorial(k)
+
+
+def stacking_lambdas(row: StackRow, probs: list[float]) -> tuple[float, float]:
+    """λ по тим САМО од реални вредности (xG, инаку очекувани голови)."""
+    features = row["features"]
+    xg_home = float(features[8]) if len(features) > 9 else 0.0
+    xg_away = float(features[9]) if len(features) > 9 else 0.0
+    if xg_home > 0.0 and xg_away > 0.0:
+        return round(xg_home, 2), round(xg_away, 2)
+    total = float(row["expected_goals"])
+    if total <= 0.0 or len(probs) < 3:
+        return 0.0, 0.0
+    weight_home = probs[0] + probs[1] / 2.0
+    weight_away = probs[2] + probs[1] / 2.0
+    denominator = weight_home + weight_away
+    share = weight_home / denominator if denominator > 0.0 else 0.5
+    share = min(0.72, max(0.28, share))
+    capped = min(5.0, max(0.4, total))
+    return round(capped * share, 2), round(capped * (1.0 - share), 2)
+
+
+def top_scores(
+    lam_home: float, lam_away: float, top: int = 3
+) -> list[tuple[str, float]]:
+    """Најверојатни точни резултати од Poisson матрица на реални λ."""
+    if lam_home <= 0.0 or lam_away <= 0.0:
+        return []
+    home = [_pmf(lam_home, k) for k in range(SCORE_GRID + 1)]
+    away = [_pmf(lam_away, k) for k in range(SCORE_GRID + 1)]
+    cells: list[tuple[str, float]] = []
+    total = 0.0
+    for h, ph in enumerate(home):
+        for a, pa in enumerate(away):
+            joint = ph * pa
+            total += joint
+            cells.append((f"{h}-{a}", joint))
+    if total <= 0.0:
+        return []
+    cells.sort(key=lambda item: -item[1])
+    return [
+        (label, round(value / total * 100.0, 1)) for label, value in cells[:top]
+    ]
+
+
+def derive_score_projections(
+    row: StackRow, probs: list[float]
+) -> list[ScoreProjection]:
+    """Топ 3 FT и топ 3 HT резултати; недостапно кога нема реални λ."""
+    lam_home, lam_away = stacking_lambdas(row, probs)
+    out: list[ScoreProjection] = []
+    periods = (
+        ("ft", FT_PERIOD_LABEL, lam_home, lam_away, "Poisson од реални λ"),
+        (
+            "ht",
+            HT_PERIOD_LABEL,
+            round(lam_home * HT_FACTOR, 2),
+            round(lam_away * HT_FACTOR, 2),
+            "Poisson од ~45% од реалните λ",
+        ),
+    )
+    for period, label, home_lam, away_lam, basis in periods:
+        scores = top_scores(home_lam, away_lam)
+        if not scores:
+            out.append(
+                ScoreProjection(
+                    match_id=row["match_id"],
+                    match_label=row["match_label"],
+                    period=period,
+                    period_label=label,
+                    rank=0,
+                    score="недостапно",
+                    probability=0.0,
+                    basis=NO_XG_SCORE_NOTE,
+                    available=False,
+                )
+            )
+            continue
+        for index, (score, probability) in enumerate(scores):
+            out.append(
+                ScoreProjection(
+                    match_id=row["match_id"],
+                    match_label=row["match_label"],
+                    period=period,
+                    period_label=label,
+                    rank=index + 1,
+                    score=score,
+                    probability=probability,
+                    basis=f"{basis} · {home_lam:.2f} — {away_lam:.2f}",
+                    available=True,
+                )
+            )
+    return out
+
+
 class StackingResult(TypedDict):
     metrics: dict[str, float]
     today_correct: int
@@ -633,6 +754,7 @@ class StackingResult(TypedDict):
     backtest: list[BacktestWeek]
     picks: list[dict[str, str | float | int | bool]]
     markets: list[StackingMarket]
+    score_projections: list[ScoreProjection]
 
 
 def _pick_label(row: StackRow, probs: list[float]) -> tuple[str, str, int]:
@@ -669,6 +791,7 @@ def run_pipeline(matches: list[dict], models: list[dict]) -> StackingResult:
         backtest=[],
         picks=[],
         markets=[],
+        score_projections=[],
     )
     if not rows:
         return empty
@@ -711,6 +834,7 @@ def run_pipeline(matches: list[dict], models: list[dict]) -> StackingResult:
 
     picks: list[dict[str, str | float | int | bool]] = []
     markets: list[StackingMarket] = []
+    projections: list[ScoreProjection] = []
     for index, row in enumerate(rows):
         row_probs = probs[index]
         label, side, best = _pick_label(row, row_probs)
@@ -719,6 +843,12 @@ def run_pipeline(matches: list[dict], models: list[dict]) -> StackingResult:
         except Exception as error:
             logging.exception(
                 f"Error: дополнителните stacking маркети не се изведени: {error}"
+            )
+        try:
+            projections.extend(derive_score_projections(row, row_probs))
+        except Exception as error:
+            logging.exception(
+                f"Error: проекциите на резултати не се изведени: {error}"
             )
         picks.append(
             {
@@ -766,6 +896,7 @@ def run_pipeline(matches: list[dict], models: list[dict]) -> StackingResult:
         backtest=backtest(rows),
         picks=picks,
         markets=markets,
+        score_projections=projections,
     )
 
 

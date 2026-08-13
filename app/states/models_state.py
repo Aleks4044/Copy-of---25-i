@@ -152,6 +152,40 @@ class ModelsState(rx.State):
     stacking_backtest: list[predictions.BacktestWeek] = []
     stacking_picks: list[StackingPick] = []
     stacking_markets: list[predictions.StackingMarket] = []
+    stacking_scores: list[predictions.ScoreProjection] = []
+
+    @rx.var
+    def stacking_scores_note(self) -> str:
+        return predictions.NO_XG_SCORE_NOTE
+
+    @rx.var
+    def stacking_score_ids(self) -> list[str]:
+        """Натпревари со реални проекции на FT/HT резултати."""
+        ids: list[str] = []
+        for row in self.stacking_scores:
+            if row["available"] and row["match_id"] not in ids:
+                ids.append(row["match_id"])
+        return ids
+
+    @rx.var
+    def stacking_ft_scores(self) -> list[predictions.ScoreProjection]:
+        return [
+            row
+            for row in self.stacking_scores
+            if row["available"] and row["period"] == "ft"
+        ]
+
+    @rx.var
+    def stacking_ht_scores(self) -> list[predictions.ScoreProjection]:
+        return [
+            row
+            for row in self.stacking_scores
+            if row["available"] and row["period"] == "ht"
+        ]
+
+    @rx.var
+    def stacking_score_match_count(self) -> int:
+        return len(self.stacking_score_ids)
 
     @rx.var
     def stacking_market_ids(self) -> list[str]:
@@ -521,6 +555,7 @@ class ModelsState(rx.State):
         self.stacking_backtest = result["backtest"]
         self.stacking_picks = self._to_picks(result["picks"])
         self.stacking_markets = list(result["markets"])
+        self.stacking_scores = list(result["score_projections"])
         self.stacking_saved = saved
         self.stacking_delta_vs_meta = round(
             self.stacking_accuracy - float(self.meta["global_accuracy"]), 2

@@ -5,7 +5,7 @@ from app.components.bzz_source_panel import bzz_source_section
 from app.components.fudbal91_panel import fudbal91_match_context
 from app.states.bsd_state import BSDMatch, BSDState, ComboMarket, ModelPick
 from app.states.models_state import ModelsState, StackingPick
-from app.states.predictions import StackingMarket
+from app.states.predictions import ScoreProjection, StackingMarket
 
 
 def _section_label(title: str, icon: str, accent: str) -> rx.Component:
@@ -807,6 +807,114 @@ def _stacking_market_tile(row: StackingMarket) -> rx.Component:
     )
 
 
+def _score_projection_row(row: ScoreProjection) -> rx.Component:
+    """Еден ред од проекцијата на точен резултат (само реални λ)."""
+    return rx.el.div(
+        rx.el.div(
+            rx.el.span(
+                f"#{row['rank']}",
+                class_name="w-5 shrink-0 text-[10px] font-bold text-zinc-600 tabular-nums",
+            ),
+            rx.el.span(
+                row["score"],
+                class_name="min-w-0 flex-1 text-sm font-semibold text-white tabular-nums",
+            ),
+            rx.el.span(
+                f"{row['probability']:.1f}%",
+                class_name="shrink-0 text-xs font-semibold text-blue-300 tabular-nums",
+            ),
+            class_name="flex items-center gap-2",
+        ),
+        rx.el.div(
+            rx.el.div(
+                class_name="h-full rounded-full bg-blue-500/80 transition-all duration-700",
+                style={"width": f"{row['probability']}%"},
+            ),
+            class_name="mt-1 h-1 w-full overflow-hidden rounded-full bg-zinc-800",
+        ),
+        class_name="w-full min-w-0 rounded-lg border border-zinc-800 bg-zinc-950/60 px-2.5 py-1.5",
+    )
+
+
+def _score_projection_column(
+    title: str,
+    icon: str,
+    rows: rx.Var,
+    match: BSDMatch,
+) -> rx.Component:
+    return rx.el.div(
+        rx.el.div(
+            rx.icon(icon, class_name="h-3 w-3 shrink-0 text-blue-400"),
+            rx.el.span(
+                title,
+                class_name="truncate text-[10px] font-semibold uppercase tracking-wider text-zinc-500",
+            ),
+            class_name="flex items-center gap-1.5",
+        ),
+        rx.el.div(
+            rx.foreach(
+                rows,
+                lambda row: rx.cond(
+                    row["match_id"] == match["id"],
+                    _score_projection_row(row),
+                    rx.fragment(),
+                ),
+            ),
+            class_name="mt-2 flex flex-col gap-1.5",
+        ),
+        class_name="w-full min-w-0 rounded-lg border border-zinc-800 bg-zinc-950/40 px-2.5 py-2",
+    )
+
+
+def _score_projections_block(match: BSDMatch) -> rx.Component:
+    """Најверојатни FT и HT резултати од вториот слој."""
+    return rx.cond(
+        ModelsState.stacking_score_ids.contains(match["id"]),
+        rx.el.div(
+            rx.el.div(
+                rx.el.span(
+                    "Проекции на точен резултат · од реални очекувани голови",
+                    class_name="truncate text-[10px] font-semibold uppercase tracking-wider text-zinc-500",
+                ),
+                rx.el.span(
+                    "Poisson од λ",
+                    class_name="shrink-0 whitespace-nowrap text-[9px] font-medium text-zinc-600",
+                ),
+                class_name="flex flex-wrap items-center justify-between gap-2",
+            ),
+            rx.el.div(
+                _score_projection_column(
+                    "Топ 3 FT резултати",
+                    "flag",
+                    ModelsState.stacking_ft_scores,
+                    match,
+                ),
+                _score_projection_column(
+                    "Топ 3 HT резултати",
+                    "timer",
+                    ModelsState.stacking_ht_scores,
+                    match,
+                ),
+                class_name="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2",
+            ),
+            rx.el.p(
+                "HT проекцијата користи ~45% од истите реални λ; ниту една "
+                "вредност не е измислена.",
+                class_name="mt-2 text-[9px] font-medium text-zinc-700",
+            ),
+            class_name="mt-3 w-full min-w-0 rounded-lg border border-zinc-800 bg-zinc-950/40 px-2.5 py-2",
+        ),
+        rx.cond(
+            ModelsState.stacking_match_ids.contains(match["id"]),
+            rx.el.div(
+                unavailable_note(ModelsState.stacking_scores_note),
+                class_name="mt-3 w-full",
+            ),
+            rx.fragment(),
+        ),
+    )
+
+
 def _stacking_markets_grid(match: BSDMatch) -> rx.Component:
     """Компактна решетка со дополнителните маркети од вториот слој."""
     return rx.cond(
@@ -903,6 +1011,7 @@ def _stacking_section(match: BSDMatch) -> rx.Component:
                 class_name="mt-3 w-full",
             ),
         ),
+        _score_projections_block(match),
         _stacking_markets_grid(match),
         class_name="mt-3 w-full min-w-0 rounded-lg border border-blue-500/20 bg-blue-500/[0.03] p-3.5",
     )
