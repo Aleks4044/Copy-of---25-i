@@ -153,6 +153,19 @@ class AppState(rx.State):
             yield event
 
     @rx.event
+    def bootstrap(self):
+        """Единствен `on_load` влез: не чека ниту едно мрежно барање.
+
+        Само подига две background задачи — иницијалното BZZ вчитување и
+        часовникот за автоматско освежување — така што страницата се
+        рендерира и хидрира веднаш.
+        """
+        from app.states.bsd_state import BSDState
+
+        yield BSDState.startup_load
+        yield AppState.start_clock
+
+    @rx.event
     def toggle_auto_refresh(self):
         self.auto_refresh = not self.auto_refresh
         self.seconds_until_refresh = self.refresh_interval

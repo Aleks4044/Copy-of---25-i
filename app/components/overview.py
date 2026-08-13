@@ -1,7 +1,12 @@
 import reflex as rx
 
-from app.components.api_status import error_banner, unavailable_note
+from app.components.api_status import (
+    error_banner,
+    loading_skeleton,
+    unavailable_note,
+)
 from app.components.stat_cards import stat_grid
+from app.states.bsd_state import BSDState
 from app.states.overview_state import LeagueRow, MatchPick, OverviewState
 
 
@@ -435,6 +440,26 @@ def overview() -> rx.Component:
             class_name="mb-5",
         ),
         error_banner(OverviewState.error),
+        rx.cond(
+            BSDState.is_loading & ~OverviewState.has_data,
+            rx.el.div(
+                rx.el.div(
+                    rx.icon(
+                        "loader-circle",
+                        class_name="h-4 w-4 shrink-0 animate-spin text-blue-400",
+                    ),
+                    rx.el.p(
+                        "Примарните BZZ податоци се вчитуваат во заднина · "
+                        "интерфејсот е веќе достапен",
+                        class_name="text-xs font-medium text-zinc-400",
+                    ),
+                    class_name="flex w-full items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/50 px-4 py-3",
+                ),
+                loading_skeleton(),
+                class_name="mb-4 w-full",
+            ),
+            rx.fragment(),
+        ),
         stat_grid(),
         rx.el.div(
             rx.el.div(

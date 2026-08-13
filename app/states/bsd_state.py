@@ -2147,35 +2147,87 @@ class BSDState(rx.State):
 
         return [OverviewState.sync, MarketsState.sync]
 
-    @rx.event
-    async def load(self):
-        """Иницијално вчитување при отворање на страницата.
+    @rx.event(background=True)
+    async def startup_load(self):
+        """Не-блокирачко иницијално вчитување (background задача).
 
-        Ова е единствениот примарен влез: при првото вчитување СЕКОГАШ ги
-        зема реалните BZZ податоци за избраниот датум, а веднаш потоа ги
-        синхронизира Преглед и Маркети — и кога BZZ врати грешка, за да не
-        останат агрегатите во празна, несинхронизирана состојба.
+        Страницата се рендерира и хидрира веднаш: ниту едно мрежно барање не
+        се чека во `on_load`. Сите промени на состојбата се прават во
+        `async with self:` блокови, а мрежните барања САМО надвор од нив, за
+        да не се заклучи UI-то. `is_loading` секогаш се враќа на False, дури
+        и при исклучок, така што состојбата не може да остане заглавена.
 
         Бавните јавни извори (Mutating, SportScore, Fudbal91, ESPN) и табот
         со модели НЕ се вчитуваат тука — тие остануваат отложени до
         отворање на соодветниот таб или до бавен круг на автоматското
         освежување.
         """
-        if not self.has_loaded and not self.is_loading:
-            # Прикажи ја состојбата на вчитување веднаш, пред мрежните барања.
-            self.is_loading = True
-            self.error = ""
-            yield
-            try:
-                await self._load_from_api()
-            except Exception as error:
-                logging.exception(
-                    f"Error: примарното вчитување не успеа: {error}"
+        skip = False
+        async with self:
+            if self.has_loaded or self.is_loading:
+                skip = True
+            else:
+                self.is_loading = True
+                self.error = ""
+            target = _as_date(self.selected_date_value)
+
+        if skip:
+            # Веќе е вчитано (или се вчитува) — само синхронизирај агрегати.
+            for event in self._startup_sync_events():
+                yield event
+            return
+
+        try:
+            from app.states import fotmob_fallback
+
+            # Тешката работа е надвор од заклучувањето на состојбата.
+            snapshot = await asyncio.to_thread(collect_matches, target)
+            rows = snapshot["matches"]
+            fotmob_note = ""
+            compare_note = ""
+            shadows: list[ShadowPick] = []
+            if rows:
+                _applied, fotmob_note = await fotmob_fallback.apply_fallback(
+                    rows
                 )
+                (
+                    raw_shadows,
+                    compare_note,
+                ) = await fotmob_fallback.compute_shadows(rows)
+                shadows = [ShadowPick(**row) for row in raw_shadows]
+
+            async with self:
+                self.rate_limited = snapshot["rate_limited"]
+                if rows:
+                    self.matches = rows
+                    self.fotmob_shadows = shadows
+                    self.compare_notice = compare_note
+                    self.generated_at = snapshot["generated_at"]
+                    self.has_loaded = True
+                    self.stats_notice = " ".join(
+                        part
+                        for part in (snapshot["notice"], fotmob_note)
+                        if part
+                    )
+                    self.error = ""
+                else:
+                    self.stats_notice = snapshot["notice"]
+                    self.error = snapshot["error"]
+        except ApiError as error:
+            logging.exception("Unexpected error")
+            logging.info(
+                f"API грешка при иницијално вчитување: {error.message}"
+            )
+            async with self:
+                self.error = error.message
+        except Exception as error:
+            logging.exception(f"Error: примарното вчитување не успеа: {error}")
+            async with self:
                 self.error = "Неочекувана грешка при вчитување на податоците."
-            finally:
+        finally:
+            async with self:
                 self.is_loading = False
-            yield
+
         # Агрегатите се синхронизираат секогаш — и при успех и при грешка.
         for event in self._startup_sync_events():
             yield event
